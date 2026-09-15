@@ -91,7 +91,12 @@ def save_individual_channel_qc(
     rendered.save(path)
 
 
-def make_qc_pdf(path: Path, overlay_paths: list[Path], title: str) -> None:
+def make_qc_pdf(
+    path: Path,
+    overlay_paths: list[Path],
+    title: str,
+    caption: str = "Composite QC: nuclear channel plus two focus channels and co-localised focus boundary.",
+) -> None:
     if path.exists():
         raise FileExistsError(f"Refusing to overwrite {path}")
     width, height = landscape(A4)
@@ -103,7 +108,7 @@ def make_qc_pdf(path: Path, overlay_paths: list[Path], title: str) -> None:
         pdf.setFont("Helvetica-Bold", 14)
         pdf.drawString(36, height - 32, title)
         pdf.setFont("Helvetica", 8)
-        pdf.drawString(36, height - 46, "Composite QC: nuclear channel plus two focus channels and co-localised focus boundary.")
+        pdf.drawString(36, height - 46, caption)
         pdf.drawRightString(width - 36, height - 46, f"Page {page_start // per_page + 1}")
         for index, overlay in enumerate(page_paths):
             col = index % 4

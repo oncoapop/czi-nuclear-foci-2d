@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from .analysis import analyse_files
 from .batch import batch_aware_summary
 from .config import load_config
 from .current_dataset import run_current_dataset_report
-from .current_dataset_plots import write_current_dataset_plots
+from .focus_qc import analyse_focus_qc_with_masks, analyse_single_focus_with_masks
 from .io import selected_files_from_manifest, selected_files_from_root
 
 
@@ -29,6 +30,27 @@ def build_parser() -> argparse.ArgumentParser:
     analyse.add_argument("--qc-title", default="CZI nuclear foci QC")
     analyse.add_argument("--limit", type=int, help="Process only the first N selected files")
     analyse.add_argument("--overwrite", action="store_true", help="Replace an existing output directory")
+
+    focus_qc = subparsers.add_parser("focus-qc", help="Detect two focus channels using fixed approved nuclei masks; no co-localisation")
+    focus_source = focus_qc.add_mutually_exclusive_group(required=True)
+    focus_source.add_argument("--root", type=Path, help="Root folder containing CZI files")
+    focus_source.add_argument("--manifest", type=Path, help="CSV manifest with a source_path column")
+    focus_qc.add_argument("--config", type=Path, required=True, help="JSON analysis configuration")
+    focus_qc.add_argument("--nuclei-mask-dir", type=Path, required=True, help="Directory containing approved <sample_id>_nuclei_labels.tif files")
+    focus_qc.add_argument("--output-dir", type=Path, required=True, help="New output directory")
+    focus_qc.add_argument("--qc-title", default="Focus detection QC using approved nuclei masks")
+    focus_qc.add_argument("--limit", type=int, help="Process only the first N selected files")
+    focus_qc.add_argument("--replicate", help="Process only this filename replicate/field, for example 01")
+
+    single = subparsers.add_parser("single-focus", help="Analyse focus A only using fixed approved nuclei masks")
+    single_source = single.add_mutually_exclusive_group(required=True)
+    single_source.add_argument("--root", type=Path, help="Root folder containing CZI files")
+    single_source.add_argument("--manifest", type=Path, help="CSV manifest with a source_path column")
+    single.add_argument("--config", type=Path, required=True, help="JSON analysis configuration; focus_a is analysed")
+    single.add_argument("--nuclei-mask-dir", type=Path, required=True)
+    single.add_argument("--output-dir", type=Path, required=True)
+    single.add_argument("--qc-title", default="Single-focus QC")
+    single.add_argument("--limit", type=int)
 
     batch = subparsers.add_parser("batch-summary", help="Compute batch-aware normalisation and thresholds")
     batch.add_argument("--nucleus-csv", type=Path, action="append", required=True, help="Input nucleus_measurements.csv; repeat for multiple experiments")
@@ -94,6 +116,42 @@ def main(argv: list[str] | None = None) -> int:
         analyse_files(files, config, args.config.resolve(), args.output_dir, args.qc_title)
         print(f"Wrote CZI foci analysis outputs to {args.output_dir}")
         return 0
+    if args.command == "focus-qc":
+        config = load_config(args.config)
+        files = selected_files_from_root(args.root, config) if args.root else selected_files_from_manifest(args.manifest)
+        if args.replicate:
+            requested = args.replicate.zfill(2)
+            selected = []
+            for path in files:
+                match = re.match(config.filename.regex, path.name, re.IGNORECASE)
+                if match and match.group(config.filename.replicate_group).zfill(2) == requested:
+                    selected.append(path)
+            files = selected
+        if args.limit:
+            files = files[: args.limit]
+        if not files:
+            parser.error("No CZI files selected")
+        if args.output_dir.exists():
+            parser.error(f"Refusing to overwrite existing output directory: {args.output_dir}")
+        analyse_focus_qc_with_masks(
+            files, config, args.config.resolve(), args.nuclei_mask_dir, args.output_dir, args.qc_title
+        )
+        print(f"Wrote provisional focus-QC outputs to {args.output_dir}; no co-localisation was calculated")
+        return 0
+    if args.command == "single-focus":
+        config = load_config(args.config)
+        files = selected_files_from_root(args.root, config) if args.root else selected_files_from_manifest(args.manifest)
+        if args.limit:
+            files = files[: args.limit]
+        if not files:
+            parser.error("No CZI files selected")
+        if args.output_dir.exists():
+            parser.error(f"Refusing to overwrite existing output directory: {args.output_dir}")
+        analyse_single_focus_with_masks(
+            files, config, args.config.resolve(), args.nuclei_mask_dir, args.output_dir, args.qc_title
+        )
+        print(f"Wrote single-focus outputs to {args.output_dir}")
+        return 0
     if args.command == "batch-summary":
         if args.output_dir.exists():
             if not args.overwrite:
@@ -129,6 +187,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote current-dataset batch-aware report to {args.output_dir}")
         return 0
     if args.command == "current-dataset-plots":
+        from .current_dataset_plots import write_current_dataset_plots
+
         outputs = write_current_dataset_plots(args.field_csv, args.output_dir)
         print(f"Wrote current-dataset comparison plots to {args.output_dir}")
         for path in outputs:

@@ -83,6 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
     current.add_argument("--overwrite", action="store_true", help="Replace an existing output directory")
     current.add_argument("--no-qc-pdf", action="store_true", help="Skip control QC PDF generation")
 
+    run_cmd = subparsers.add_parser(
+        "run", help="Run the whole pipeline for every experiment in a YAML/JSON config")
+    run_cmd.add_argument("--config", type=Path, required=True, help="YAML or JSON pipeline config")
+    run_cmd.add_argument("--overwrite", action="store_true", help="Replace an existing output root")
+
     plots = subparsers.add_parser("current-dataset-plots", help="Plot current dataset field summaries in the first-iteration multi-panel format")
     plots.add_argument(
         "--field-csv",
@@ -102,6 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "run":
+        from .pipeline import run_pipeline
+
+        run_pipeline(args.config.resolve(), overwrite=args.overwrite)
+        return 0
     if args.command == "analyse":
         config = load_config(args.config)
         files = selected_files_from_root(args.root, config) if args.root else selected_files_from_manifest(args.manifest)

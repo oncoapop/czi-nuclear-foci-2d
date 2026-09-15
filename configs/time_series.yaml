@@ -1,0 +1,136 @@
+# =============================================================================
+# czi-foci pipeline configuration
+#
+#   env PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib \
+#     /Users/dyap/miniconda3/bin/python3 -m czi_foci.cli run \
+#     --config configs/time_series.yaml
+#
+# To analyse a NEW dataset: copy this file, change run.output_root and the
+# experiments block, and check that filename.patterns matches your filenames.
+# Everything else can usually stay as-is.
+#
+# The interpreter matters. These values were validated against
+# /Users/dyap/miniconda3/bin/python3 (numpy 1.26.2, scipy 1.13.1,
+# scikit-image 0.24.0). A newer scikit-image can change segmentation output.
+# =============================================================================
+version: 1
+
+run:
+  output_root: "/Volumes/Backup/czi-analysis-runs/2026-09-15_time_series"
+  write_qc_pdfs: true
+  combine:
+    enabled: true            # writes combined_{nucleus,image}_*.csv
+    batch_aware_report: true # within-batch normalisation + threshold tables
+
+# -----------------------------------------------------------------------------
+# Inherited by every experiment below; any key can be overridden per experiment.
+# -----------------------------------------------------------------------------
+defaults:
+
+  channels:
+    nuclei:
+      index: 2
+      label: DAPI
+      gaussian_sigma_px: 1.2
+      min_area_um2: 35.0
+      hole_area_um2: 20.0
+      watershed_min_distance_px: 10
+
+    focus_a:
+      name: af488_spot
+      index: 1
+      label: "53BP1 (AF488)"
+      tophat_radius_px: 4
+      min_area_px: 3
+      # The dominant parameter in the whole pipeline. Verified 2026-09-15:
+      # moving this 4.0 -> 3.0 raises total AF488 counts 1.32x and RhReX 2.20x;
+      # 4.0 -> 5.0 drops them to 0.75x and 0.57x. Treatment/control RATIOS are
+      # stable across that range (spread <= 1.5x), absolute counts are not.
+      # Report fold-changes, not raw counts per nucleus.
+      threshold_mad_multiplier: 4.0
+      # Verified inert: 4.0, 8.0 and 12.0 give byte-identical output, and even
+      # 40.0 changes totals by 0.4%. The MAD threshold above is the only real
+      # gate. Kept at the published value for reproducibility.
+      min_intensity_above_local_background: 8.0
+
+    focus_b:
+      name: rhrex_putative_gH2AX
+      index: 0
+      label: "gamma-H2AX, putative (Rhodamine Red-X)"
+      tophat_radius_px: 8
+      min_area_px: 8
+      threshold_mad_multiplier: 4.0
+      min_intensity_above_local_background: 8.0
+
+  colocalization:
+    dilation_px: 1
+
+  filename:
+    # Tried in order; the one matching the most files in an experiment wins.
+    # Must capture named groups: timepoint, condition, replicate.
+    patterns:
+      - '^(?P<timepoint>\d+)\s*hr\s+20x\s+(?P<condition>.+)-(?P<replicate>\d+)\.czi$'
+      - '^(?P<timepoint>\d+)\s*hr\s+(?P<condition>.+?)\s+20x\s*-?\s*(?P<replicate>\d+)\.czi$'
+
+  conditions:
+    controls: [Aqueous, DMSO, NAH2PO4, Media]
+    order:    [Aqueous, DMSO, NAH2PO4, Media, CX-5461, Cisplatin, Etoposide, PDS, Palbociclib]
+
+  qc:
+    display_percentile_low: 1.0
+    display_percentile_high: 99.8
+
+  analysis:
+    # One TS... folder = one batch. Verified against the data: control medians
+    # are stable across acquisition dates within an experiment but shift between
+    # experiments. Normalise within batch, then model jointly with batch as a
+    # stratum. Alternatives: [experiment, acquisition_date_folder].
+    batch_columns: [experiment]
+
+    # These get a within-batch proportion model (fraction of nuclei with >=1
+    # focus) in addition to control-z. Over 78% of control nuclei have zero
+    # RhReX foci, so the median is 0, the MAD is 0, and robust_control_stats
+    # silently falls back to a non-robust standard deviation.
+    zero_inflated_metrics: [rhrex_putative_gH2AX_count]
+
+    # false reproduces published behaviour. Border nuclei are 10.2% of all
+    # nuclei and carry 13-20% fewer foci, but excluding them shifts condition
+    # means only ~2.5% and contrasts 1-2%, so this is cleanliness not rescue.
+    exclude_border_nuclei: false
+
+    # Fields with fewer nuclei than this are dropped and listed in the log.
+    min_nuclei_per_field: 1
+
+# -----------------------------------------------------------------------------
+# One block per experiment.
+# -----------------------------------------------------------------------------
+experiments:
+
+  - name: TS III
+    root: "/Volumes/Backup/TS runs/Time Series III (quarter dilution)"
+
+  - name: TS IV
+    root: "/Volumes/Backup/TS runs/Time Series IV (weird controls)"
+    # Controls in this experiment run high (mean AF488 ~3.5-4.0 vs ~1.8-3.3
+    # elsewhere, MAD 2 vs 1). Within-batch normalisation absorbs this, at the
+    # cost of sensitivity here.
+
+  - name: TS V
+    root: "/Volumes/Backup/TS runs/Time Series V (24+48hr)"
+    filename:
+      patterns:
+        - '^(?P<timepoint>\d+)\s*hr\s+20x\s+(?P<condition>[A-H])-(?P<replicate>\d+)\.czi$'
+    conditions:
+      # Plate-coded experiment: wells A-H map to treatments. This mapping was
+      # previously applied by an untracked step, so it is recorded here and in
+      # the run manifest. 24 h and 48 h are the SAME plate and staining batch
+      # imaged on consecutive days - not independent replicates.
+      map:
+        A: {condition: CX-5461,     concentration: "1 uM",   control: false}
+        B: {condition: Cisplatin,   concentration: "1.2 uM", control: false}
+        C: {condition: Etoposide,   concentration: "1 uM",   control: false}
+        D: {condition: Palbociclib, concentration: "50 nM",  control: false}
+        E: {condition: NAH2PO4,     concentration: "50 uM",  control: true}
+        F: {condition: Media,       concentration: "none",   control: true}
+        G: {condition: DMSO,        concentration: "0.001%", control: true}
+        H: {condition: PDS,         concentration: "5 uM",   control: false}

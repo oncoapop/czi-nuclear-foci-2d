@@ -9,7 +9,7 @@ import importlib.util
 import json
 import shutil
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -514,12 +514,20 @@ def plot_metric(df: pd.DataFrame, metric: str, threshold: int, title: str, outpu
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--root", type=Path, help="Folder to search recursively for CZI files")
+    source.add_argument("--manifest", type=Path, help="CSV with a source_path column selecting exact files")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--qc-title", default="Dual channel co-localisation QC")
     parser.add_argument("--plot-title", default="Dual channel nuclear spot counts")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--limit", type=int)
+    # Sensitivity-analysis overrides. Defaults are None so that omitting them
+    # leaves the published DualParameters values untouched.
+    parser.add_argument("--mad-multiplier", type=float,
+                        help="Override BOTH channels' threshold_mad_multiplier (published: 4.0)")
+    parser.add_argument("--min-intensity-above-background", type=float,
+                        help="Override BOTH channels' min intensity above local background (published: 8.0)")
     args = parser.parse_args()
 
     if args.output_dir.exists():
@@ -529,11 +537,23 @@ def main() -> int:
     args.output_dir.mkdir(parents=True)
 
     params = DualParameters()
+    if args.mad_multiplier is not None:
+        params = replace(params,
+                         af488_threshold_mad_multiplier=args.mad_multiplier,
+                         rhrex_threshold_mad_multiplier=args.mad_multiplier)
+    if args.min_intensity_above_background is not None:
+        params = replace(params,
+                         af488_min_intensity_above_local_background=args.min_intensity_above_background,
+                         rhrex_min_intensity_above_local_background=args.min_intensity_above_background)
     (args.output_dir / "parameters.json").write_text(json.dumps(asdict(params), indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     base = load_module("segment_nuclei_spots_base", "segment_nuclei_spots.py")
     inspector = base.load_inspector()
-    files = base.selected_files_from_root(args.root)
+    files = (
+        base.selected_files_from_root(args.root)
+        if args.root
+        else base.selected_files_from_manifest(args.manifest)
+    )
     if args.limit:
         files = files[: args.limit]
 

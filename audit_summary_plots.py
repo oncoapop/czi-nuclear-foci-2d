@@ -277,3 +277,70 @@ fig.savefig(OUT / "fig3_decisions_checked.png", dpi=200)
 plt.close(fig)
 print("fig3 done")
 print(f"\nwrote figures to {OUT}")
+
+# =================================================================== FIGURE 4
+eff = pd.read_csv(AUDIT / "effects53" / "effects_all_mad.csv")
+piv = eff.pivot_table(index=["experiment", "timepoint_hr", "condition"],
+                      columns="mad_multiplier", values="fold_change")
+q4 = eff[eff.mad_multiplier == 4.0].set_index(["experiment", "timepoint_hr", "condition"])["q_bh"]
+ORDER = ["Etoposide", "CX-5461", "PDS", "Cisplatin", "Palbociclib"]
+
+rows = []
+for exp in ["TS III", "TS IV", "TS V"]:
+    for tp in sorted({t for (e, t, c) in piv.index if e == exp}):
+        for cond in ORDER:
+            if (exp, tp, cond) in piv.index:
+                r = piv.loc[(exp, tp, cond)]
+                rows.append((f"{exp}  {int(tp)} h", cond, r[3.0], r[4.0], r[5.0],
+                             q4.get((exp, tp, cond), np.nan)))
+        rows.append((None, None, None, None, None, None))      # block spacer
+rows = rows[:-1]
+
+fig, ax = plt.subplots(figsize=(9.2, 11.4))
+ypos, ylabels, blocklab = [], [], []
+y = len(rows)
+for blk, cond, f3, f4, f5, q in rows:
+    if cond is None:
+        y -= 1; continue
+    sig = q < 0.05
+    col = S1 if sig else MUTED
+    ax.plot([min(f3, f5), max(f3, f5)], [y, y], color=col, lw=2.6, solid_capstyle="round",
+            alpha=0.95 if sig else 0.55, zorder=3)
+    ax.plot([f4], [y], "o", ms=8, color=col, markeredgecolor=SURFACE, markeredgewidth=1.8, zorder=4)
+    ax.text(max(f3, f4, f5) + 0.13, y, f"{f4:.2f}x" + ("" if sig else "  ns"),
+            fontsize=7.5, va="center", color=INK2)
+    ypos.append(y); ylabels.append(cond)
+    blocklab.append(blk)
+    y -= 1
+
+ax.axvline(1.0, color=CRITICAL, lw=1.3, ls="--", zorder=2)
+ax.text(1.03, max(ypos) + 1.4, "no change vs control", fontsize=8, color=CRITICAL)
+ax.set_yticks(ypos); ax.set_yticklabels(ylabels, fontsize=8.5)
+seen = set()
+for yy, bl in zip(ypos, blocklab):
+    if bl not in seen:
+        seen.add(bl)
+        ax.text(-0.02, yy + 0.62, bl, transform=ax.get_yaxis_transform(), ha="right",
+                fontsize=9, color=INK, fontweight="medium")
+ax.set_xlim(0, 7.0); ax.set_ylim(min(ypos) - 1.2, max(ypos) + 2.4)
+ax.set_xlabel("53BP1 foci per nucleus, fold of within-block control")
+ax.set_title("53BP1 effect sizes hold across the parameter range",
+             fontsize=13, fontweight="semibold", color=INK, loc="left", pad=40)
+ax.text(0, 1.022, "Dot = published setting (MAD 4.0); bar spans MAD 3.0-5.0.",
+        transform=ax.transAxes, fontsize=8.5, color=INK2)
+ax.text(0, 1.002, "Blue = q<0.05 vs controls of its own experiment x timepoint block "
+        "(field-level Welch, BH-FDR over 35 contrasts).",
+        transform=ax.transAxes, fontsize=8.5, color=INK2)
+handles = [plt.Line2D([], [], color=S1, lw=2.6, marker="o", ms=7, markeredgecolor=SURFACE),
+           plt.Line2D([], [], color=MUTED, lw=2.6, marker="o", ms=7, markeredgecolor=SURFACE, alpha=0.55)]
+ax.legend(handles, ["significant (q<0.05)", "not significant"], frameon=False, fontsize=8,
+          loc="lower right", labelcolor=INK2)
+ax.grid(axis="x", zorder=0); ax.set_axisbelow(True)
+for s in ("top", "right", "left"):
+    ax.spines[s].set_visible(False)
+ax.spines["bottom"].set_color(BASELINE)
+ax.tick_params(axis="y", length=0)
+fig.tight_layout(rect=(0.02, 0.01, 1, 0.985))
+fig.savefig(OUT / "fig4_53bp1_effects.png", dpi=200)
+plt.close(fig)
+print("fig4 done")

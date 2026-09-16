@@ -1,0 +1,40 @@
+{
+  "experiment_name": "TSIII",
+  "nuclei": {
+    "channel_index": 2,
+    "label": "DAPI-T3",
+    "gaussian_sigma_px": 1.2,
+    "min_area_um2": 35.0,
+    "hole_area_um2": 20.0,
+    "watershed_min_distance_px": 10
+  },
+  "focus_a": {
+    "name": "53BP1",
+    "channel_index": 1,
+    "label": "53BP1 (AF488-T2)",
+    "tophat_radius_px": 4,
+    "min_area_px": 3,
+    "threshold_mad_multiplier": 3.0,
+    "min_intensity_above_local_background": 8.0
+  },
+  "filename": {
+    "regex": "^(?P<timepoint>\\d+)\\s*hr\\s+(?P<condition>.+?)\\s+20x\\s*-(?P<replicate>\\d+)\\.czi$",
+    "condition_group": "condition",
+    "timepoint_group": "timepoint",
+    "replicate_group": "replicate"
+  },
+  "output": {
+    "qc_display_percentile_low": 1.0,
+    "qc_display_percentile_high": 99.8,
+    "positive_thresholds": {}
+  },
+  "focus_b": {
+    "name": "gH2AX",
+    "channel_index": 0,
+    "label": "gamma-H2AX (RhReX-T1)",
+    "tophat_radius_px": 8,
+    "min_area_px": 8,
+    "threshold_mad_multiplier": 4.0,
+    "min_intensity_above_local_background": 8.0
+  }
+}

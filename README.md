@@ -11,7 +11,7 @@ Config-driven local analysis for 3-channel ZEISS CZI images:
 Raw CZI files are never modified and no image data is uploaded.
 
 **This repository is the 2-D analysis.** The 3-D / Imaris (`.ims`) work lives in
-[oncoapop/czi-nuclear-foci](https://github.com/oncoapop/czi-nuclear-foci). The two were split
+[oncoapop/czi-nuclear-foci-3d](https://github.com/oncoapop/czi-nuclear-foci-3d). The two were split
 because 3-D segmentation genuinely differs (ball footprints, volume thresholds, anisotropic
 voxels, physical-distance colocalisation), not for tidiness. Both carry their own copy of
 `czi_reader.py`; fixes to the binary CZI parsing need porting between them.

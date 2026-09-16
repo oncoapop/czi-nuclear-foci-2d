@@ -1,0 +1,9 @@
+condition_code,well_number,condition,concentration,condition_type,is_vehicle_or_control,source_note
+A,1,CX-5461,1 uM,treatment,FALSE,User-provided TS V setup image
+B,2,Cisplatin,1.2 uM,treatment,FALSE,User-provided TS V setup image
+C,3,Etoposide,1 uM,treatment,FALSE,User-provided TS V setup image
+D,4,Palbociclib,50 nM,treatment,FALSE,User-provided TS V setup image
+E,5,NAH2PO4,50 uM,vehicle_or_control,TRUE,User-provided TS V setup image
+F,6,Media,media_only,vehicle_or_control,TRUE,User-provided TS V setup image
+G,7,DMSO,0.001%,vehicle_or_control,TRUE,User-provided TS V setup image
+H,8,PDS,5 uM,treatment,FALSE,User-provided TS V setup image

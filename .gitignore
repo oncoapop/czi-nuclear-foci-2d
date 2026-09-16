@@ -12,20 +12,8 @@ sample_sheet_summary.tsv
 time_series_*_sample_sheet.csv
 time_series_*_sample_sheet_summary.tsv
 
-# Local legacy analysis scripts not part of the package
-/generate_sample_sheet.py
-/inspect_czi.py
-/label_trf2opt_conditions.py
-/make_channel_qc_examples.py
-/make_coloc_zoom_examples.py
-/make_review_pdf.py
-/plot_both_experiments_field_summary.py
-/plot_spot_thresholds.py
-/plot_trf2opt_v2.py
-/segment_dual_channel_coloc.py
-/segment_nuclei_spots.py
-/segment_trf2_dapi.py
-/segment_trf2_dapi_v2.py
-/summarize_all_czi_experiments.py
-/summarize_dual_channel_thresholds.py
-/time_series_V_condition_mapping.csv
+# The analysis scripts at the repository root were previously ignored here and
+# are now tracked. segment_dual_channel_coloc.py and segment_nuclei_spots.py are
+# what actually produced the published TS III/IV/V results; keeping them out of
+# version control is why the provenance of those results could not be
+# reconstructed from the repository. See docs/PROVENANCE.md.

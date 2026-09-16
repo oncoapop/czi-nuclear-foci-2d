@@ -16,7 +16,7 @@
 version: 1
 
 run:
-  output_root: "/Volumes/Backup/czi-analysis-runs/2026-09-15_time_series"
+  output_root: "/Volumes/Backup/czi-analysis-runs/2026-09-15_time_series_v2"
   write_qc_pdfs: true
   combine:
     enabled: true            # writes combined_{nucleus,image}_*.csv

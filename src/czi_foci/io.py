@@ -50,7 +50,37 @@ def inspect_czi(path: Path) -> dict:
     return czi_reader.inspect(path, include_stats=False, preview_dir=None, plane_dir=None)
 
 
+def _reject_multiplane(path: Path, subblocks: list[dict]) -> None:
+    """Refuse files holding more than one plane per channel.
+
+    This reader keeps a single 2-D plane per channel. A Z-stack, time series,
+    tiled mosaic or multi-scene file has several subblocks per channel, and
+    without this check the last one silently wins - a 19-plane Z-stack collapses
+    to its final, out-of-focus plane with no error raised.
+    """
+    per_channel: dict[int, int] = {}
+    extra: dict[str, set[int]] = {}
+    for index, block in enumerate(subblocks):
+        dims = block["dimensions"]
+        channel = int(dims.get("C", {}).get("start", index))
+        per_channel[channel] = per_channel.get(channel, 0) + 1
+        for name in ("Z", "T", "S", "M"):
+            if name in dims:
+                extra.setdefault(name, set()).add(int(dims[name].get("start", 0)))
+    crowded = [n for n in per_channel.values() if n > 1]
+    if not crowded:
+        return
+    spread = ", ".join(f"{k}={len(v)}" for k, v in sorted(extra.items()) if len(v) > 1)
+    raise ValueError(
+        f"Multi-plane CZI is not supported by the 2-D reader: {path}\n"
+        f"  {len(subblocks)} subblocks across {len(per_channel)} channels "
+        f"({max(crowded)} planes per channel; {spread or 'unidentified extra dimension'}).\n"
+        f"  Project to a single plane first, or use the 3-D analysis mode."
+    )
+
+
 def read_channel_arrays(path: Path, inspection: dict) -> dict[int, np.ndarray]:
+    _reject_multiplane(path, inspection["subblocks"])
     arrays: dict[int, np.ndarray] = {}
     with path.open("rb") as handle:
         for index, block in enumerate(inspection["subblocks"]):

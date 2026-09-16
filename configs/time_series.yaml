@@ -81,11 +81,15 @@ defaults:
     display_percentile_high: 99.8
 
   analysis:
-    # One TS... folder = one batch. Verified against the data: control medians
-    # are stable across acquisition dates within an experiment but shift between
-    # experiments. Normalise within batch, then model jointly with batch as a
-    # stratum. Alternatives: [experiment, acquisition_date_folder].
-    batch_columns: [experiment]
+    # Batch = experiment x timepoint, NOT experiment alone.
+    # An earlier reading of this data said folder-level was enough; field-level
+    # testing disproved it. TS III controls fall from 3.27 (2 h) to 2.01 (6 h) -
+    # 1.63x, Welch p = 0.0004 - on a single acquisition date, so it is not an
+    # imaging-session effect. That within-experiment shift is nearly as large as
+    # the whole between-experiment range (1.95x). Normalising per experiment
+    # alone pools those two baselines and under-corrects TS III.
+    # Normalise within batch, then model jointly with batch as a stratum.
+    batch_columns: [experiment, timepoint_hr]
 
     # These get a within-batch proportion model (fraction of nuclei with >=1
     # focus) in addition to control-z. Over 78% of control nuclei have zero

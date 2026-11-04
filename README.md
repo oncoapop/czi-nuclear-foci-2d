@@ -79,6 +79,13 @@ The 2026-09-15 audit measured what survives a change to the detection threshold
 - Four fields per condition is underpowered for FDR-corrected significance. Large, consistent
   effects can still read "ns".
 
+Figures that follow this guidance: `make_publication_53bp1_foldchange.py` writes
+`output/publication_53BP1_foldchange_v1/`, which plots each field as a fold-change against the
+mean of the control fields in its own experiment x timepoint batch, with control fields shown on
+the same axis as the noise floor. It supersedes `make_publication_53bp1.py`, which puts absolute
+field medians and percent->5 on the y-axis; that script is retained so the earlier figures stay
+reproducible.
+
 ## Channel status
 
 Benchmarked against literature expectation, using Palbociclib (CDK4/6 inhibitor, non-genotoxic)

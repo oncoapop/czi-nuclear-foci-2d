@@ -142,6 +142,18 @@ across batches.
 - Cross-experiment comparisons remain vulnerable to staining and acquisition effects unless
   normalised within batch.
 
+## Lab-book snapshot
+
+`make_labbook_snapshot.py` assembles a self-contained bundle outside any git checkout -
+figures, every analysis table, the per-nucleus and per-focus CSVs, the nuclei and 53BP1 label
+masks, the per-field QC overlays and contact sheets, and the scripts that produced them. Nuclei
+masks are re-hashed at copy time against the sha256 in `approved_nuclei_mask_manifest.csv`, and
+a mismatch fails the run. About 1.3 GB; `--skip-masks` drops it to ~250 MB.
+
+```zsh
+/Users/dyap/miniconda3/bin/python3 make_labbook_snapshot.py
+```
+
 ## Provenance
 
 `docs/PROVENANCE.md` records what produced what, the required interpreter, data coverage

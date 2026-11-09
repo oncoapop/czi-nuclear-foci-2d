@@ -22,9 +22,14 @@ bit-exactly. Start there if you are checking published numbers.
 
 ## Environment - read this before installing
 
-**Do not create a fresh venv and `pip install -e .`.** Newer scikit-image changes
-`peak_local_max`, `watershed` and `threshold_otsu` behaviour, and segmentation output changes
-with it. Results were produced with, and only reproduce under:
+**Do not create a fresh venv and `pip install -e .`.** `pyproject.toml` declares its runtime
+dependencies without upper bounds, so a plain install resolves to whatever is current that day.
+Newer scikit-image changes `peak_local_max`, `watershed` and `threshold_otsu` behaviour, and
+segmentation output changes with it — silently. Nothing errors; the numbers just stop matching
+every previously published figure.
+
+Results were produced with, and only reproduce under, the versions in
+[`constraints-analysis.txt`](constraints-analysis.txt):
 
 | package | version |
 |---|---|
@@ -33,8 +38,32 @@ with it. Results were produced with, and only reproduce under:
 | scipy | 1.13.1 |
 | scikit-image | **0.24.0** |
 | pandas | 2.1.4 |
-| matplotlib | 3.8.2 |
+| matplotlib | 3.8.1 |
+| Pillow | 11.0.0 |
 | reportlab | 4.0.8 |
+| aicspylibczi | 4.0.1 (test extra) |
+
+To reproduce that environment exactly:
+
+```zsh
+pip install -e '.[test]' -c constraints-analysis.txt
+```
+
+The `test` extra pulls in `aicspylibczi`, which the real-file half of
+`tests/test_czi_reader_offsets.py` needs to cross-check this package's CZI decoding against an
+independent implementation of the format. That comparison is what caught the `data_offset` bug;
+without the extra installed it cannot run, and the suite can go green having never checked a
+real pixel.
+
+Run the full suite, including that comparison:
+
+```zsh
+env CZI_TEST_MANIFEST=sample_sheet.csv PYTHONPATH=src python -m unittest discover -s tests -t tests
+```
+
+Setting `CZI_TEST_MANIFEST` is an explicit request for the real-file comparison, so it **fails**
+rather than skips if `aicspylibczi` is missing or the manifest resolves to no readable file.
+Leave it unset and that test skips, so a checkout without the acquisition volume still runs green.
 
 Every command below assumes:
 

@@ -1,29 +1,54 @@
 """Pixel-correctness tests for the CZI subblock reader.
 
-Added after `parse_subblock` was found to compute `data_offset` 16 bytes too
-late, which shifted every decoded plane by 8 uint16 pixels. Nothing in the
-suite caught it: `test_io_multiplane` exercises the multiplane guard with
-synthetic dicts whose `data_offset` is 0, so the arithmetic was untested.
+Added after `parse_subblock` was found to compute `data_offset` 16 bytes past
+the first pixel byte, shifting every decoded plane by 8 uint16 pixels. Nothing
+in the suite caught it: `test_io_multiplane` exercises the multiplane guard
+with synthetic dicts whose `data_offset` is 0, so the offset arithmetic itself
+had no test.
 
-Two layers here:
+Three layers:
 
 * `SubblockOffsetTests` builds a synthetic ZISRAW subblock payload and checks
-  the offset arithmetic directly. Runs anywhere, no data needed.
-* `ReaderMatchesReferenceTests` decodes real planes and compares them to
-  aicspylibczi (an independent implementation wrapping Zeiss's libCZI). Skips
-  when the acquisition volume is not mounted or aicspylibczi is absent.
+  the offset arithmetic directly. Runs anywhere, needs no data.
+* `ReaderMatchesReferenceTests` drives the public 2-D entry point
+  (`inspect_czi` -> `read_channel_arrays`) over real files and compares every
+  channel to aicspylibczi, an independent implementation wrapping Zeiss's
+  libCZI. It deliberately goes through the public API rather than re-reading
+  subblocks by hand, so the guard in `read_channel_arrays` stays on the path
+  under test.
+* `MultiplaneRejectionTests` checks that a real Z-stack is refused rather than
+  silently collapsed. `test_io_multiplane` already covers this with synthetic
+  subblocks; this closes the loop on an actual file.
+
+Pointing the real-file tests at data
+------------------------------------
+`CZI_TEST_MANIFEST` takes a directory of .czi files, a single .czi, or a CSV
+with a `source_path` column. It falls back to sample_sheet.csv at the repo
+root::
+
+    CZI_TEST_MANIFEST=/path/to/sample_sheet.csv \\
+        python -m unittest discover -s tests -t tests
+
+`CZI_TEST_ZSTACK` points at a multi-plane CZI for the rejection test.
+
+Both skip when their data is unreachable. A skip means the comparison did NOT
+run -- read the skip reason rather than taking a green suite as verification.
 """
 from __future__ import annotations
 
 import csv
 import io
+import os
 import struct
 import unittest
 from pathlib import Path
 
 from czi_foci import czi_reader
+from czi_foci.io import inspect_czi, read_channel_arrays
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+MANIFEST_ENV = "CZI_TEST_MANIFEST"
+ZSTACK_ENV = "CZI_TEST_ZSTACK"
 
 
 def build_directory_entry(dimensions: list[tuple[str, int, int, int]]) -> bytes:
@@ -45,13 +70,14 @@ def build_directory_entry(dimensions: list[tuple[str, int, int, int]]) -> bytes:
 class SubblockOffsetTests(unittest.TestCase):
     """data_offset must point at the first pixel byte, not past it."""
 
-    def _parse(self, metadata_size: int, attachment_size: int, dimensions):
+    DIMS = [("X", 0, 4, 4), ("Y", 0, 4, 4), ("C", 0, 1, 1)]
+
+    def _parse(self, metadata_size: int, attachment_size: int, dimensions=None):
+        dimensions = self.DIMS if dimensions is None else dimensions
         data_size = 32
         payload = struct.pack("<IIQ", metadata_size, attachment_size, data_size)
-        entry = build_directory_entry(dimensions)
-        payload += entry
-        # pad the leading block out to 256 bytes, as the writer does
-        payload = payload.ljust(256, b"\0")
+        payload += build_directory_entry(dimensions)
+        payload = payload.ljust(256, b"\0")         # writer pads the leading block to 256
         payload += b"M" * metadata_size
         payload += b"P" * data_size
         payload += b"A" * attachment_size
@@ -66,82 +92,127 @@ class SubblockOffsetTests(unittest.TestCase):
         return czi_reader.parse_subblock(handle, segment, include_stats=False), handle
 
     def test_data_offset_lands_on_the_first_pixel_byte(self) -> None:
-        dims = [("X", 0, 4, 4), ("Y", 0, 4, 4), ("C", 0, 1, 1)]
-        result, handle = self._parse(metadata_size=100, attachment_size=0, dimensions=dims)
+        result, handle = self._parse(metadata_size=100, attachment_size=0)
         handle.seek(result["data_offset"])
         self.assertEqual(handle.read(result["data_size"]), b"P" * 32)
 
     def test_attachment_does_not_shift_the_data_offset(self) -> None:
         """The attachment trails the pixel data, so it must not move data_offset."""
-        dims = [("X", 0, 4, 4), ("Y", 0, 4, 4), ("C", 0, 1, 1)]
-        without, _ = self._parse(metadata_size=64, attachment_size=0, dimensions=dims)
-        with_attachment, handle = self._parse(metadata_size=64, attachment_size=48, dimensions=dims)
+        without, _ = self._parse(metadata_size=64, attachment_size=0)
+        with_attachment, handle = self._parse(metadata_size=64, attachment_size=48)
         self.assertEqual(without["data_offset"], with_attachment["data_offset"])
         handle.seek(with_attachment["data_offset"])
         self.assertEqual(handle.read(with_attachment["data_size"]), b"P" * 32)
 
+    def test_metadata_size_shifts_the_data_offset(self) -> None:
+        """Metadata sits between the leading block and the pixel data."""
+        small, _ = self._parse(metadata_size=0, attachment_size=0)
+        large, handle = self._parse(metadata_size=128, attachment_size=0)
+        self.assertEqual(large["data_offset"] - small["data_offset"], 128)
+        handle.seek(large["data_offset"])
+        self.assertEqual(handle.read(large["data_size"]), b"P" * 32)
 
-def find_sample_czi(limit: int = 3) -> list[Path]:
-    sheet = REPO_ROOT / "sample_sheet.csv"
-    if not sheet.exists():
-        return []
-    found: list[Path] = []
-    with sheet.open(newline="") as fh:
-        for row in csv.DictReader(fh):
-            candidate = Path(row.get("source_path", ""))
-            if candidate.is_file():
-                found.append(candidate)
-                if len(found) >= limit:
-                    break
-    return found
+    def test_leading_block_holds_at_the_256_byte_floor(self) -> None:
+        """parse_directory_entry caps dimension_count at 10, so 16 + 32 + 20*10
+        = 248 never exceeds the 256-byte floor. This pins that reasoning: if the
+        cap is ever raised, this test documents what has to be rechecked."""
+        dims = [(name, 0, 1, 1) for name in ("X", "Y", "C", "Z", "T", "S", "M", "H", "I", "V")]
+        self.assertEqual(len(dims), 10)
+        result, handle = self._parse(metadata_size=0, attachment_size=0, dimensions=dims)
+        self.assertEqual(result["data_offset"], 32 + 256)
+        handle.seek(result["data_offset"])
+        self.assertEqual(handle.read(result["data_size"]), b"P" * 32)
+
+
+def discover_czi(limit: int = 3) -> list[Path]:
+    """Real CZI files from CZI_TEST_MANIFEST, else the repo's sample_sheet.csv."""
+    sources: list[Path] = []
+    configured = os.environ.get(MANIFEST_ENV)
+    candidates = [Path(configured)] if configured else []
+    candidates.append(REPO_ROOT / "sample_sheet.csv")
+
+    for candidate in candidates:
+        if candidate.is_dir():
+            sources = sorted(candidate.glob("*.czi"))[:limit]
+        elif candidate.is_file() and candidate.suffix.lower() == ".czi":
+            sources = [candidate]
+        elif candidate.is_file():
+            with candidate.open(newline="") as handle:
+                for row in csv.DictReader(handle):
+                    path = Path(row.get("source_path", ""))
+                    if path.is_file():
+                        sources.append(path)
+                        if len(sources) >= limit:
+                            break
+        if sources:
+            break
+    return [p for p in sources if p.is_file()][:limit]
 
 
 class ReaderMatchesReferenceTests(unittest.TestCase):
-    """Decoded pixels must match an independent CZI implementation."""
+    """Pixels from the public 2-D path must match an independent implementation."""
 
     def setUp(self) -> None:
         try:
-            from aicspylibczi import CziFile  # noqa: F401
+            import aicspylibczi  # noqa: F401
         except ImportError:
             self.skipTest("aicspylibczi not installed")
-        self.samples = find_sample_czi()
+        self.samples = discover_czi()
         if not self.samples:
-            self.skipTest("no CZI from sample_sheet.csv is reachable (volume not mounted?)")
+            self.skipTest(
+                f"no CZI reachable; set {MANIFEST_ENV} to a .czi directory or a CSV "
+                "with a source_path column"
+            )
 
-    def test_every_channel_matches_aicspylibczi(self) -> None:
+    def test_read_channel_arrays_matches_aicspylibczi(self) -> None:
         import numpy as np
         from aicspylibczi import CziFile
 
+        compared = 0
         for path in self.samples:
-            inspection = czi_reader.inspect(
-                path, include_stats=False, preview_dir=None, plane_dir=None
-            )
-            reference = CziFile(str(path))
             with self.subTest(czi=path.name):
-                for block in inspection["subblocks"]:
-                    dims = block["dimensions"]
-                    if block["compression_code"] != 0:
-                        continue
-                    channel = int(dims.get("C", {}).get("start", 0))
-                    z = int(dims.get("Z", {}).get("start", 0))
-                    height = int(dims["Y"]["stored_size"])
-                    width = int(dims["X"]["stored_size"])
+                # the public 2-D entry point, so _reject_multiplane stays on the
+                # path under test rather than being bypassed
+                arrays = read_channel_arrays(path, inspect_czi(path))
+                self.assertTrue(arrays, f"{path.name}: no channels returned")
 
-                    with path.open("rb") as handle:
-                        handle.seek(block["data_offset"])
-                        raw = czi_reader.read_exact(handle, block["data_size"])
-                    dtype = np.dtype(block["dtype"]).newbyteorder("<")
-                    mine = np.frombuffer(raw, dtype=dtype).reshape((height, width))
-
-                    kwargs = {"C": channel}
-                    if "Z" in dims:
-                        kwargs["Z"] = z
-                    theirs = np.squeeze(reference.read_image(**kwargs)[0])
-
+                reference = CziFile(str(path))
+                for channel, plane in sorted(arrays.items()):
+                    self.assertEqual(plane.ndim, 2, "2-D reader must return 2-D planes")
+                    theirs = np.squeeze(reference.read_image(C=channel)[0])
                     self.assertTrue(
-                        np.array_equal(mine, theirs),
-                        f"{path.name} C={channel} Z={z} differs from aicspylibczi",
+                        np.array_equal(plane, theirs),
+                        f"{path.name} C={channel} differs from aicspylibczi",
                     )
+                    compared += 1
+        self.assertGreater(compared, 0, "no planes were compared")
+
+
+class MultiplaneRejectionTests(unittest.TestCase):
+    """A real Z-stack must be refused, not silently collapsed to one plane."""
+
+    def setUp(self) -> None:
+        configured = os.environ.get(ZSTACK_ENV)
+        if not configured:
+            self.skipTest(f"set {ZSTACK_ENV} to a multi-plane CZI to exercise this")
+        self.zstack = Path(configured)
+        if not self.zstack.is_file():
+            self.skipTest(f"{ZSTACK_ENV} is not a readable file: {self.zstack}")
+
+    def test_real_z_stack_is_rejected(self) -> None:
+        inspection = inspect_czi(self.zstack)
+        planes_per_channel: dict[int, int] = {}
+        for index, block in enumerate(inspection["subblocks"]):
+            channel = int(block["dimensions"].get("C", {}).get("start", index))
+            planes_per_channel[channel] = planes_per_channel.get(channel, 0) + 1
+        self.assertGreater(
+            max(planes_per_channel.values()), 1,
+            f"{self.zstack.name} is not multi-plane; point {ZSTACK_ENV} at a Z-stack",
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            read_channel_arrays(self.zstack, inspection)
+        self.assertIn("Multi-plane CZI is not supported", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -22,19 +22,70 @@ bit-exactly. Start there if you are checking published numbers.
 
 ## Environment - read this before installing
 
-**Do not create a fresh venv and `pip install -e .`.** Newer scikit-image changes
-`peak_local_max`, `watershed` and `threshold_otsu` behaviour, and segmentation output changes
-with it. Results were produced with, and only reproduce under:
+**Do not create a fresh venv and `pip install -e .`.** `pyproject.toml` declares its runtime
+dependencies without upper bounds, so a plain install resolves to whatever is current that day.
+Newer scikit-image changes `peak_local_max`, `watershed` and `threshold_otsu` behaviour, and
+segmentation output changes with it — silently. Nothing errors; the numbers just stop matching
+every previously published figure.
 
-| package | version |
-|---|---|
-| python | 3.11.4 |
-| numpy | 1.26.2 |
-| scipy | 1.13.1 |
-| scikit-image | **0.24.0** |
-| pandas | 2.1.4 |
-| matplotlib | 3.8.2 |
-| reportlab | 4.0.8 |
+Results were produced with, and only reproduce under, the versions recorded in
+[`constraints-analysis.txt`](constraints-analysis.txt) and pinned by the `analysis` extra:
+
+| package | version | where |
+|---|---|---|
+| python | 3.11.4 | interpreter — see the caveat below |
+| numpy | 1.26.2 | `analysis` |
+| scipy | 1.13.1 | `analysis` |
+| scikit-image | **0.24.0** | `analysis` |
+| pandas | 2.1.4 | `analysis` |
+| matplotlib | 3.8.1 | `analysis` |
+| Pillow | 11.0.0 | `analysis` |
+| reportlab | 4.0.8 | `analysis` |
+| PyYAML | 6.0.3 | `analysis` — YAML configs only |
+| aicspylibczi | 4.0.1 | `test` |
+
+To install that set:
+
+```zsh
+pip install -e '.[analysis,test]' -c constraints-analysis.txt
+```
+
+**Both halves are needed.** A constraints file only bounds packages that something else has
+already selected; `-c` on a package nobody requested is silently inert. The earlier documented
+command omitted the `analysis` extra and so installed **no matplotlib at all** — neither the base
+dependencies nor the `test` extra requested it, and the constraint on it did nothing. The extra
+does the selecting; the constraints file bounds the transitive closure too.
+
+Two things this still does not pin:
+
+- **The interpreter.** `python3 -m venv` builds against whatever `python3` invoked it; it cannot
+  give you 3.11.4 on request. Check `python -V` yourself, or build the environment with conda,
+  which can pin the interpreter.
+- **The full transitive closure.** `constraints-analysis.txt` lists direct dependencies, not
+  every package in the environment. It is a pin set, not a lock file.
+
+`tests/test_environment_pins.py` fails if `pyproject.toml` and `constraints-analysis.txt` drift
+apart, or if a declared runtime dependency is left out of the `analysis` extra — the shape of
+the matplotlib bug above.
+
+The `test` extra pulls in `aicspylibczi`, which the real-file half of
+`tests/test_czi_reader_offsets.py` needs to cross-check this package's CZI decoding against an
+independent implementation of the format. That comparison is what caught the `data_offset` bug;
+without the extra installed it cannot run, and the suite can go green having never checked a
+real pixel.
+
+Run the full suite, including that comparison:
+
+```zsh
+env CZI_TEST_MANIFEST=sample_sheet.csv PYTHONPATH=src python -m unittest discover -s tests -t tests
+```
+
+Setting `CZI_TEST_MANIFEST` is an explicit request for the real-file comparison, so it **fails**
+rather than skips if `aicspylibczi` is missing or the manifest resolves to no readable file.
+Setting it also **disables the `sample_sheet.csv` fallback** — a manifest naming files that
+cannot be resolved must fail rather than quietly compare some other dataset. Leave it unset and
+the repo's own `sample_sheet.csv` is used; with neither, the test skips, so a checkout without
+the acquisition volume still runs green.
 
 Every command below assumes:
 

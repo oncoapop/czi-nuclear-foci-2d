@@ -226,13 +226,16 @@ def parse_subblock(handle: BinaryIO, segment: Segment, include_stats: bool) -> d
     )
     directory_raw = read_exact(handle, DIRECTORY_ENTRY_SIZE)
     entry = parse_directory_entry(directory_raw)
-    data_offset = (
-        segment.payload_offset
-        + SUBBLOCK_FIXED_HEADER_SIZE
-        + DIRECTORY_ENTRY_SIZE
-        + metadata_size
-        + attachment_size
-    )
+    # ZISRAW subblock layout: [sizes header | DirectoryEntryDV | fill] then
+    # metadata, then pixel data, then attachment. The leading block is padded to
+    # at least DIRECTORY_ENTRY_SIZE (256) bytes INCLUDING the 16-byte sizes
+    # header, so adding SUBBLOCK_FIXED_HEADER_SIZE on top double-counts it. The
+    # attachment trails the pixel data and must not shift the data offset at
+    # all. Both errors were present here and pushed data_offset 16 bytes late,
+    # shifting every decoded plane by 8 uint16 pixels.
+    directory_entry_size = 32 + 20 * len(entry["dimensions"])
+    leading_block = max(DIRECTORY_ENTRY_SIZE, SUBBLOCK_FIXED_HEADER_SIZE + directory_entry_size)
+    data_offset = segment.payload_offset + leading_block + metadata_size
     result = {
         "segment_offset": segment.offset,
         "metadata_size": metadata_size,
